@@ -11,16 +11,18 @@ import {
   X,
   RotateCcw,
   Boxes,
-  Search
+  Search,
+  RefreshCw
 } from 'lucide-react';
 import DataTable from '../components/ui/DataTable';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
-import { mockProducts } from '../data/mockData';
+import { productService } from '../services/api';
 import './Products.css';
 
 const DEFAULT_CATEGORIES = [
+  'Raw Material',
   'Electronics',
   'Packaging',
   'Warehouse Equipment',
@@ -29,6 +31,7 @@ const DEFAULT_CATEGORIES = [
 ];
 
 const DEFAULT_UOMS = [
+  'kg',
   'Units',
   'Rolls',
   'Boxes',
@@ -37,70 +40,140 @@ const DEFAULT_UOMS = [
   'Pairs',
   'Sets',
   'Meters',
-  'kg',
+  'Liters',
 ];
 
 const INITIAL_FORM_STATE = {
   name: '',
   sku: '',
-  category: 'Electronics',
-  unitOfMeasure: 'Units',
-  stock: 10,
-  minStock: 10,
-  unitPrice: 0.00,
-  location: '',
-  supplier: '',
+  category: 'Raw Material',
+  unit: 'kg',
+  reorder_level: 20,
 };
 
 export default function Products() {
-  // 1. Local State for Inventory Catalog
-  const [products, setProducts] = useState(mockProducts);
+  // 1. Products and Live Stocks from Backend
+  const [products, setProducts] = useState([]);
+  const [stocks, setStocks] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
   // 2. Filters & Search State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedStatus, setSelectedStatus] = useState('All');
 
-  // 3. Modal States
+  // 3. Modal & Mutation States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null); // null = Add, object = Edit
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [formErrors, setFormErrors] = useState({});
-  const [productToDelete, setProductToDelete] = useState(null);
+  const [apiError, setApiError] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 4. Toast Notification State
+  // 4. Delete State
+  const [productToDelete, setProductToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // 5. Toast Notification State
   const [toast, setToast] = useState(null);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type, id: Date.now() });
   };
 
-  const handleCloseModal = useCallback(() => {
-    setIsModalOpen(false);
-    setEditingProduct(null);
-    setFormData(INITIAL_FORM_STATE);
-    setFormErrors({});
-  }, []);
-
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => {
       setToast(null);
-    }, 3500);
+    }, 4000);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  // Modal Close Callback
+  const handleCloseModal = useCallback(() => {
+    if (isSubmitting) return; // Prevent closing while in flight
+    setIsModalOpen(false);
+    setEditingProduct(null);
+    setFormData(INITIAL_FORM_STATE);
+    setFormErrors({});
+    setApiError(null);
+  }, [isSubmitting]);
 
   // Keyboard shortcut to close modals on Escape
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
-        if (productToDelete) setProductToDelete(null);
-        else if (isModalOpen) handleCloseModal();
+        if (productToDelete && !isDeleting) setProductToDelete(null);
+        else if (isModalOpen && !isSubmitting) handleCloseModal();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isModalOpen, productToDelete, handleCloseModal]);
+  }, [isModalOpen, productToDelete, isSubmitting, isDeleting, handleCloseModal]);
+
+  // 6. Fetch products and stocks from FastAPI Backend
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const [productsData, stocksData] = await Promise.all([
+        productService.getAll(),
+        productService.getStock().catch(() => []),
+      ]);
+
+      const stockMap = {};
+      if (Array.isArray(stocksData)) {
+        stocksData.forEach((s) => {
+          stockMap[s.product_id] = (stockMap[s.product_id] || 0) + (s.quantity || 0);
+        });
+      }
+
+      setStocks(stockMap);
+      setProducts(Array.isArray(productsData) ? productsData : []);
+    } catch (err) {
+      console.error('Failed to load products from backend:', err);
+      setFetchError(err.message || 'Unable to connect to StockSense API');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    async function fetchInitial() {
+      setIsLoading(true);
+      setFetchError(null);
+      try {
+        const [productsData, stocksData] = await Promise.all([
+          productService.getAll(),
+          productService.getStock().catch(() => []),
+        ]);
+        if (!ignore) {
+          const stockMap = {};
+          if (Array.isArray(stocksData)) {
+            stocksData.forEach((s) => {
+              stockMap[s.product_id] = (stockMap[s.product_id] || 0) + (s.quantity || 0);
+            });
+          }
+          setStocks(stockMap);
+          setProducts(Array.isArray(productsData) ? productsData : []);
+        }
+      } catch (err) {
+        if (!ignore) {
+          setFetchError(err.message || 'Unable to connect to StockSense API');
+        }
+      } finally {
+        if (!ignore) {
+          setIsLoading(false);
+        }
+      }
+    }
+    fetchInitial();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   // Available unique categories derived from current products and defaults
   const categories = useMemo(() => {
@@ -113,7 +186,23 @@ export default function Products() {
 
   const statuses = ['All', 'In Stock', 'Low Stock', 'Out of Stock'];
 
-  // 5. Filtering Logic
+  // Helper to compute live status for a product based on stock and reorder level
+  const getProductStockAndStatus = useCallback(
+    (product) => {
+      const stock = stocks[product.id] || 0;
+      const reorderLevel = Number(product.reorder_level) || 0;
+      let status = 'In Stock';
+      if (stock === 0) {
+        status = 'Out of Stock';
+      } else if (stock <= reorderLevel) {
+        status = 'Low Stock';
+      }
+      return { stock, status };
+    },
+    [stocks]
+  );
+
+  // 7. Filtering Logic
   const filteredProducts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return products.filter((item) => {
@@ -121,18 +210,18 @@ export default function Products() {
         !q ||
         item.name.toLowerCase().includes(q) ||
         item.sku.toLowerCase().includes(q) ||
-        (item.location && item.location.toLowerCase().includes(q)) ||
-        (item.supplier && item.supplier.toLowerCase().includes(q));
+        (item.category && item.category.toLowerCase().includes(q));
 
       const matchesCategory =
         selectedCategory === 'All' || item.category === selectedCategory;
 
+      const { status } = getProductStockAndStatus(item);
       const matchesStatus =
-        selectedStatus === 'All' || item.status === selectedStatus;
+        selectedStatus === 'All' || status === selectedStatus;
 
       return matchesSearch && matchesCategory && matchesStatus;
     });
-  }, [products, searchQuery, selectedCategory, selectedStatus]);
+  }, [products, searchQuery, selectedCategory, selectedStatus, getProductStockAndStatus]);
 
   // Active filter count
   const activeFiltersCount =
@@ -146,20 +235,12 @@ export default function Products() {
     setSelectedStatus('All');
   };
 
-  // Helper to calculate status based on stock and min safety stock
-  const calculateStatus = (stock, minStock) => {
-    const s = Number(stock) || 0;
-    const m = Number(minStock) || 10;
-    if (s <= 0) return 'Out of Stock';
-    if (s <= m) return 'Low Stock';
-    return 'In Stock';
-  };
-
-  // 6. Modal Open/Close Handlers
+  // 8. Modal Open Handlers
   const handleOpenAddModal = () => {
     setEditingProduct(null);
     setFormData(INITIAL_FORM_STATE);
     setFormErrors({});
+    setApiError(null);
     setIsModalOpen(true);
   };
 
@@ -168,22 +249,21 @@ export default function Products() {
     setFormData({
       name: product.name || '',
       sku: product.sku || '',
-      category: product.category || 'Electronics',
-      unitOfMeasure: product.unitOfMeasure || 'Units',
-      stock: product.stock !== undefined ? product.stock : 0,
-      minStock: product.minStock !== undefined ? product.minStock : 10,
-      unitPrice: product.unitPrice !== undefined ? product.unitPrice : 0,
-      location: product.location || '',
-      supplier: product.supplier || '',
+      category: product.category || 'Raw Material',
+      unit: product.unit || 'kg',
+      reorder_level:
+        product.reorder_level !== undefined && product.reorder_level !== null
+          ? product.reorder_level
+          : 20,
     });
     setFormErrors({});
+    setApiError(null);
     setIsModalOpen(true);
   };
 
-  // 7. Form Field Change & Validation
+  // 9. Form Field Change & Frontend Validation
   const handleInputChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    // Clear field-specific error as user types
     if (formErrors[field]) {
       setFormErrors((prev) => {
         const next = { ...prev };
@@ -191,146 +271,97 @@ export default function Products() {
         return next;
       });
     }
+    if (apiError) setApiError(null);
   };
 
   const validateForm = () => {
     const errors = {};
 
-    // Product Name validation
     if (!formData.name || !formData.name.trim()) {
       errors.name = 'Product name is required';
-    } else if (formData.name.trim().length < 2) {
-      errors.name = 'Product name must be at least 2 characters';
+    } else if (formData.name.trim().length < 1) {
+      errors.name = 'Product name must have at least 1 character';
     }
 
-    // SKU Code validation
     if (!formData.sku || !formData.sku.trim()) {
       errors.sku = 'SKU / Code is required';
-    } else {
-      const normalizedSku = formData.sku.trim().toUpperCase();
-      const duplicate = products.find(
-        (p) =>
-          (!editingProduct || p.id !== editingProduct.id) &&
-          p.sku.toUpperCase() === normalizedSku
-      );
-      if (duplicate) {
-        errors.sku = `SKU "${normalizedSku}" is already in use by "${duplicate.name}"`;
-      }
     }
 
-    // Category validation
-    if (!formData.category || !formData.category.trim()) {
-      errors.category = 'Category is required';
-    }
-
-    // Unit of Measure validation
-    if (!formData.unitOfMeasure || !formData.unitOfMeasure.trim()) {
-      errors.unitOfMeasure = 'Unit of Measure is required';
-    }
-
-    // Stock validation
     if (
-      formData.stock === '' ||
-      formData.stock === null ||
-      isNaN(Number(formData.stock)) ||
-      Number(formData.stock) < 0
+      formData.reorder_level === '' ||
+      formData.reorder_level === null ||
+      isNaN(Number(formData.reorder_level)) ||
+      Number(formData.reorder_level) < 0
     ) {
-      errors.stock = 'Stock must be a non-negative number (0 or higher)';
-    }
-
-    // Min Safety Stock validation
-    if (
-      formData.minStock !== '' &&
-      (isNaN(Number(formData.minStock)) || Number(formData.minStock) < 0)
-    ) {
-      errors.minStock = 'Min safety stock must be a non-negative number';
-    }
-
-    // Unit Price validation
-    if (
-      formData.unitPrice !== '' &&
-      (isNaN(Number(formData.unitPrice)) || Number(formData.unitPrice) < 0)
-    ) {
-      errors.unitPrice = 'Unit price cannot be negative';
+      errors.reorder_level = 'Reorder level must be 0 or higher';
     }
 
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  // 8. Submit Add / Edit Form
-  const handleSaveProduct = (e) => {
+  // 10. Submit Add / Edit Form to FastAPI Backend
+  const handleSaveProduct = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
 
-    const parsedStock = Number(formData.stock) || 0;
-    const parsedMinStock = Number(formData.minStock) || 10;
-    const parsedPrice = Number(formData.unitPrice) || 0;
-    const status = calculateStatus(parsedStock, parsedMinStock);
+    setIsSubmitting(true);
+    setApiError(null);
 
-    if (editingProduct) {
-      // Update existing product
-      const updatedProduct = {
-        ...editingProduct,
-        name: formData.name.trim(),
-        sku: formData.sku.trim().toUpperCase(),
-        category: formData.category.trim(),
-        unitOfMeasure: formData.unitOfMeasure.trim(),
-        stock: parsedStock,
-        minStock: parsedMinStock,
-        maxStock: Math.max(parsedMinStock * 4, parsedStock * 2, 100),
-        unitPrice: parsedPrice,
-        location: formData.location.trim() || 'Unassigned Bay',
-        supplier: formData.supplier.trim() || 'General Supplier',
-        status,
-      };
+    const payload = {
+      name: formData.name.trim(),
+      sku: formData.sku.trim().toUpperCase(),
+      category: formData.category.trim() || 'General',
+      unit: formData.unit.trim() || 'Units',
+      reorder_level: Number(formData.reorder_level) || 0,
+    };
 
-      setProducts((prev) =>
-        prev.map((p) => (p.id === editingProduct.id ? updatedProduct : p))
-      );
-      showToast(`Product "${updatedProduct.name}" (${updatedProduct.sku}) updated successfully.`);
-    } else {
-      // Create new product
-      const newId = `PRD-${Date.now().toString().slice(-4)}`;
-      const createdProduct = {
-        id: newId,
-        name: formData.name.trim(),
-        sku: formData.sku.trim().toUpperCase(),
-        category: formData.category.trim(),
-        unitOfMeasure: formData.unitOfMeasure.trim(),
-        stock: parsedStock,
-        minStock: parsedMinStock,
-        maxStock: Math.max(parsedMinStock * 4, parsedStock * 2, 100),
-        unitPrice: parsedPrice,
-        location: formData.location.trim() || 'Zone A - General Bay',
-        supplier: formData.supplier.trim() || 'StockSense Inbound',
-        status,
-        lastRestocked: new Date().toISOString().split('T')[0],
-      };
-
-      setProducts((prev) => [createdProduct, ...prev]);
-      showToast(`Product "${createdProduct.name}" (${createdProduct.sku}) created successfully.`);
+    try {
+      if (editingProduct) {
+        // PUT /products/{id}
+        const updated = await productService.update(editingProduct.id, payload);
+        // Only update state after backend succeeds
+        setProducts((prev) =>
+          prev.map((p) => (p.id === editingProduct.id ? updated : p))
+        );
+        showToast(`Product "${updated.name}" (${updated.sku}) updated successfully.`);
+      } else {
+        // POST /products
+        const created = await productService.create(payload);
+        // Only update state after backend succeeds
+        setProducts((prev) => [created, ...prev]);
+        showToast(`Product "${created.name}" (${created.sku}) created successfully.`);
+      }
+      handleCloseModal();
+    } catch (err) {
+      console.error('Backend operation failed:', err);
+      setApiError(err.message || 'Operation failed on backend server.');
+      showToast(err.message || 'Operation failed', 'danger');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    handleCloseModal();
   };
 
-  // 9. Delete Product Logic
-  const handleConfirmDelete = () => {
+  // 11. Delete Product via DELETE /products/{id}
+  const handleConfirmDelete = async () => {
     if (!productToDelete) return;
     const { id, name, sku } = productToDelete;
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-    setProductToDelete(null);
-    showToast(`Product "${name}" (${sku}) deleted from catalog.`, 'danger');
+    setIsDeleting(true);
+    try {
+      await productService.delete(id);
+      // Only update state after backend succeeds
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+      setProductToDelete(null);
+      showToast(`Product "${name}" (${sku}) deleted successfully.`, 'danger');
+    } catch (err) {
+      console.error('Failed to delete product on backend:', err);
+      showToast(err.message || 'Failed to delete product', 'danger');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
-  const handleRestoreSampleData = () => {
-    setProducts(mockProducts);
-    handleResetFilters();
-    showToast('Sample products catalog restored.');
-  };
-
-  // 10. Table Columns Definition
+  // 12. Table Columns Definition
   const columns = [
     {
       header: 'Product Name',
@@ -343,8 +374,10 @@ export default function Products() {
           <div>
             <div className="product-title">{row.name}</div>
             <div className="product-subtitle">
-              ID: <span className="font-mono">{row.id}</span>
-              {row.location ? ` • ${row.location}` : ''}
+              ID: <span className="font-mono">#{row.id}</span>
+              {row.created_at
+                ? ` • Added: ${new Date(row.created_at).toLocaleDateString()}`
+                : ''}
             </div>
           </div>
         </div>
@@ -363,39 +396,42 @@ export default function Products() {
       render: (row) => (
         <span className="category-pill">
           <Tag size={12} className="cat-icon" />
-          <span>{row.category}</span>
+          <span>{row.category || 'General'}</span>
         </span>
       ),
     },
     {
       header: 'Unit of Measure',
-      accessor: 'unitOfMeasure',
+      accessor: 'unit',
       width: '130px',
-      render: (row) => (
-        <span className="uom-pill">{row.unitOfMeasure || 'Units'}</span>
-      ),
+      render: (row) => <span className="uom-pill">{row.unit || 'Units'}</span>,
     },
     {
       header: 'Current Stock',
       accessor: 'stock',
       width: '180px',
       render: (row) => {
-        const minVal = row.minStock || 10;
-        const maxVal = row.maxStock || Math.max(minVal * 4, 100);
-        const pct = Math.min(Math.max((row.stock / maxVal) * 100, row.stock > 0 ? 8 : 0), 100);
+        const { stock } = getProductStockAndStatus(row);
+        const reorder = Number(row.reorder_level) || 0;
+        const maxVal = Math.max(reorder * 4, stock * 2, 100);
+        const pct = Math.min(Math.max((stock / maxVal) * 100, stock > 0 ? 8 : 0), 100);
+
         return (
           <div className="product-stock-cell">
             <div className="stock-label-row">
-              <span className="stock-num text-white">{row.stock.toLocaleString()}</span>
-              <span className="stock-uom-suffix">{row.unitOfMeasure || 'Units'}</span>
-              <span className="stock-bounds text-muted">/ min {minVal}</span>
+              <span className="stock-num text-white">{stock.toLocaleString()}</span>
+              <span className="stock-uom-suffix">{row.unit || 'Units'}</span>
+              <span className="stock-bounds text-muted">/ min {reorder}</span>
             </div>
-            <div className="stock-level-bar" title={`Current: ${row.stock} / Safety: ${minVal}`}>
+            <div
+              className="stock-level-bar"
+              title={`Current Stock: ${stock} ${row.unit || 'Units'} / Reorder Level: ${reorder}`}
+            >
               <div
                 className={`stock-fill ${
-                  row.stock === 0
+                  stock === 0
                     ? 'fill-danger'
-                    : row.stock <= minVal
+                    : stock <= reorder
                     ? 'fill-warning'
                     : 'fill-success'
                 }`}
@@ -410,7 +446,10 @@ export default function Products() {
       header: 'Stock Status',
       accessor: 'status',
       width: '135px',
-      render: (row) => <Badge dot>{row.status}</Badge>,
+      render: (row) => {
+        const { status } = getProductStockAndStatus(row);
+        return <Badge dot>{status}</Badge>;
+      },
     },
     {
       header: 'Actions',
@@ -442,9 +481,15 @@ export default function Products() {
   ];
 
   // Counts for KPI pills
-  const inStockCount = products.filter((p) => p.status === 'In Stock').length;
-  const lowStockCount = products.filter((p) => p.status === 'Low Stock').length;
-  const outOfStockCount = products.filter((p) => p.status === 'Out of Stock').length;
+  const inStockCount = products.filter(
+    (p) => getProductStockAndStatus(p).status === 'In Stock'
+  ).length;
+  const lowStockCount = products.filter(
+    (p) => getProductStockAndStatus(p).status === 'Low Stock'
+  ).length;
+  const outOfStockCount = products.filter(
+    (p) => getProductStockAndStatus(p).status === 'Out of Stock'
+  ).length;
 
   return (
     <div className="products-page">
@@ -456,11 +501,25 @@ export default function Products() {
             <span>Products Master Catalog</span>
           </h1>
           <p>
-            Manage warehouse inventory items, SKU codes, categories, units of measure, and live stock statuses.
+            Connected to StockSense FastAPI backend. Real-time items, SKU codes, and live inventory levels.
           </p>
         </div>
 
         <div className="page-actions">
+          <span className="backend-status-badge">
+            <span className="backend-status-dot" />
+            API Connected
+          </span>
+          <Button
+            variant="outline"
+            size="md"
+            icon={RefreshCw}
+            onClick={loadData}
+            disabled={isLoading}
+            title="Reload products from backend"
+          >
+            {isLoading ? 'Syncing...' : 'Sync'}
+          </Button>
           <Button
             variant="primary"
             size="md"
@@ -472,7 +531,7 @@ export default function Products() {
         </div>
       </div>
 
-      {/* 2. Quick KPI Summary Bar (Clickable for fast filtering) */}
+      {/* 2. Quick KPI Summary Bar (Clickable for fast status filtering) */}
       <div className="products-kpi-bar">
         <div
           className={`kpi-mini kpi-mini-clickable ${
@@ -579,24 +638,35 @@ export default function Products() {
         </div>
       </div>
 
-      {/* 4. Products DataTable or Empty States */}
-      {products.length === 0 ? (
+      {/* 4. Products DataTable, Loading, or Empty States */}
+      {isLoading && products.length === 0 ? (
+        <div className="products-loading-card">
+          <div className="loading-spinner" />
+          <div className="loading-text">Loading products from StockSense API...</div>
+        </div>
+      ) : fetchError ? (
+        <div className="backend-error-card">
+          <div className="backend-error-icon">
+            <AlertCircle size={28} />
+          </div>
+          <div className="backend-error-title">Unable to Connect to FastAPI Backend</div>
+          <p className="backend-error-msg">{fetchError}</p>
+          <Button variant="primary" icon={RotateCcw} onClick={loadData}>
+            Retry Connection
+          </Button>
+        </div>
+      ) : products.length === 0 ? (
         <div className="card products-empty-state">
           <div className="empty-icon-wrap">
             <Boxes size={28} />
           </div>
-          <div className="empty-title">Inventory Catalog is Empty</div>
+          <div className="empty-title">No Products in Database Yet</div>
           <p className="empty-desc">
-            No products currently exist in your local warehouse inventory registry.
+            The FastAPI backend returned an empty product catalog. Add your first product below to store it in the database.
           </p>
-          <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
-            <Button variant="primary" icon={Plus} onClick={handleOpenAddModal}>
-              Add First Product
-            </Button>
-            <Button variant="outline" icon={RotateCcw} onClick={handleRestoreSampleData}>
-              Restore Sample Data
-            </Button>
-          </div>
+          <Button variant="primary" icon={Plus} onClick={handleOpenAddModal}>
+            Add First Product
+          </Button>
         </div>
       ) : filteredProducts.length === 0 ? (
         <div className="card products-empty-state">
@@ -638,13 +708,14 @@ export default function Products() {
                   {editingProduct ? <Pencil size={18} /> : <Plus size={18} />}
                 </div>
                 <h3 id="product-modal-title">
-                  {editingProduct ? 'Edit Product Details' : 'Add New Inventory Product'}
+                  {editingProduct ? `Edit Product #${editingProduct.id}` : 'Add New Inventory Product'}
                 </h3>
               </div>
               <button
                 type="button"
                 className="modal-close-btn"
                 onClick={handleCloseModal}
+                disabled={isSubmitting}
                 aria-label="Close modal"
               >
                 <X size={16} />
@@ -652,7 +723,15 @@ export default function Products() {
             </div>
 
             <form onSubmit={handleSaveProduct} className="modal-form" noValidate>
-              {Object.keys(formErrors).length > 0 && (
+              {/* Backend Error Banner */}
+              {apiError && (
+                <div className="modal-banner-error">
+                  <AlertCircle size={16} />
+                  <span>{apiError}</span>
+                </div>
+              )}
+
+              {Object.keys(formErrors).length > 0 && !apiError && (
                 <div className="modal-banner-error">
                   <AlertCircle size={16} />
                   <span>Please correct the highlighted fields before saving.</span>
@@ -672,8 +751,9 @@ export default function Products() {
                     type="text"
                     required
                     autoFocus
+                    disabled={isSubmitting}
                     className={`input-field ${formErrors.name ? 'input-invalid' : ''}`}
-                    placeholder="e.g. Industrial Barcode Scanner X5"
+                    placeholder="e.g. Steel Rods"
                     value={formData.name}
                     onChange={(e) => handleInputChange('name', e.target.value)}
                   />
@@ -697,8 +777,9 @@ export default function Products() {
                     id="prod-sku"
                     type="text"
                     required
+                    disabled={isSubmitting}
                     className={`input-field font-mono ${formErrors.sku ? 'input-invalid' : ''}`}
-                    placeholder="e.g. SKU-LOG-920"
+                    placeholder="e.g. STL001"
                     value={formData.sku}
                     onChange={(e) => handleInputChange('sku', e.target.value.toUpperCase())}
                   />
@@ -719,6 +800,7 @@ export default function Products() {
                   </label>
                   <select
                     id="prod-category"
+                    disabled={isSubmitting}
                     className={`input-field ${formErrors.category ? 'input-invalid' : ''}`}
                     value={formData.category}
                     onChange={(e) => handleInputChange('category', e.target.value)}
@@ -743,13 +825,14 @@ export default function Products() {
                     <span>
                       Unit of Measure <span className="label-required">*</span>
                     </span>
-                    <span className="form-hint">Standard UoM</span>
+                    <span className="form-hint">e.g. kg, Units, Box</span>
                   </label>
                   <select
                     id="prod-uom"
-                    className={`input-field ${formErrors.unitOfMeasure ? 'input-invalid' : ''}`}
-                    value={formData.unitOfMeasure}
-                    onChange={(e) => handleInputChange('unitOfMeasure', e.target.value)}
+                    disabled={isSubmitting}
+                    className={`input-field ${formErrors.unit ? 'input-invalid' : ''}`}
+                    value={formData.unit}
+                    onChange={(e) => handleInputChange('unit', e.target.value)}
                   >
                     {DEFAULT_UOMS.map((unit) => (
                       <option key={unit} value={unit}>
@@ -757,123 +840,64 @@ export default function Products() {
                       </option>
                     ))}
                   </select>
-                  {formErrors.unitOfMeasure && (
+                  {formErrors.unit && (
                     <div className="form-error">
                       <AlertCircle size={13} />
-                      <span>{formErrors.unitOfMeasure}</span>
+                      <span>{formErrors.unit}</span>
                     </div>
                   )}
                 </div>
 
-                {/* Initial Stock (or Current Stock when editing) */}
+                {/* Reorder Level */}
                 <div className="form-group">
-                  <label htmlFor="prod-stock">
+                  <label htmlFor="prod-reorder">
                     <span>
-                      {editingProduct ? 'Current Stock' : 'Initial Stock'}{' '}
-                      <span className="label-required">*</span>
+                      Reorder Level (Min Stock) <span className="label-required">*</span>
                     </span>
-                    <span className="form-hint">Quantity on hand</span>
+                    <span className="form-hint">Threshold</span>
                   </label>
                   <input
-                    id="prod-stock"
+                    id="prod-reorder"
                     type="number"
                     min="0"
                     step="1"
                     required
-                    className={`input-field ${formErrors.stock ? 'input-invalid' : ''}`}
-                    value={formData.stock}
-                    onChange={(e) => handleInputChange('stock', e.target.value)}
+                    disabled={isSubmitting}
+                    className={`input-field ${formErrors.reorder_level ? 'input-invalid' : ''}`}
+                    value={formData.reorder_level}
+                    onChange={(e) => handleInputChange('reorder_level', e.target.value)}
                   />
-                  {formErrors.stock && (
+                  {formErrors.reorder_level && (
                     <div className="form-error">
                       <AlertCircle size={13} />
-                      <span>{formErrors.stock}</span>
+                      <span>{formErrors.reorder_level}</span>
                     </div>
                   )}
-                </div>
-
-                {/* Min Safety Stock */}
-                <div className="form-group">
-                  <label htmlFor="prod-min-stock">
-                    <span>Min Safety Stock</span>
-                    <span className="form-hint">Triggers Low Stock</span>
-                  </label>
-                  <input
-                    id="prod-min-stock"
-                    type="number"
-                    min="0"
-                    step="1"
-                    className={`input-field ${formErrors.minStock ? 'input-invalid' : ''}`}
-                    value={formData.minStock}
-                    onChange={(e) => handleInputChange('minStock', e.target.value)}
-                  />
-                  {formErrors.minStock && (
-                    <div className="form-error">
-                      <AlertCircle size={13} />
-                      <span>{formErrors.minStock}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Unit Price */}
-                <div className="form-group">
-                  <label htmlFor="prod-price">
-                    <span>Unit Price ($)</span>
-                  </label>
-                  <input
-                    id="prod-price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    className={`input-field ${formErrors.unitPrice ? 'input-invalid' : ''}`}
-                    value={formData.unitPrice}
-                    onChange={(e) => handleInputChange('unitPrice', e.target.value)}
-                  />
-                  {formErrors.unitPrice && (
-                    <div className="form-error">
-                      <AlertCircle size={13} />
-                      <span>{formErrors.unitPrice}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Storage Location / Bay */}
-                <div className="form-group">
-                  <label htmlFor="prod-location">
-                    <span>Storage Location / Bay</span>
-                  </label>
-                  <input
-                    id="prod-location"
-                    type="text"
-                    className="input-field"
-                    placeholder="e.g. Zone A - Bay 04"
-                    value={formData.location}
-                    onChange={(e) => handleInputChange('location', e.target.value)}
-                  />
-                </div>
-
-                {/* Supplier */}
-                <div className="form-group">
-                  <label htmlFor="prod-supplier">
-                    <span>Primary Supplier</span>
-                  </label>
-                  <input
-                    id="prod-supplier"
-                    type="text"
-                    className="input-field"
-                    placeholder="e.g. ScanTech Global"
-                    value={formData.supplier}
-                    onChange={(e) => handleInputChange('supplier', e.target.value)}
-                  />
                 </div>
               </div>
 
               <div className="modal-footer">
-                <Button variant="outline" size="md" onClick={handleCloseModal}>
+                <Button
+                  variant="outline"
+                  size="md"
+                  onClick={handleCloseModal}
+                  disabled={isSubmitting}
+                >
                   Cancel
                 </Button>
-                <Button variant="primary" size="md" type="submit">
-                  {editingProduct ? 'Save Changes' : 'Create Product'}
+                <Button
+                  variant="primary"
+                  size="md"
+                  type="submit"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting
+                    ? editingProduct
+                      ? 'Saving Changes...'
+                      : 'Creating Product...'
+                    : editingProduct
+                    ? 'Save Changes'
+                    : 'Create Product'}
                 </Button>
               </div>
             </form>
@@ -883,7 +907,12 @@ export default function Products() {
 
       {/* 6. Delete Confirmation Modal */}
       {productToDelete && (
-        <div className="modal-backdrop" onClick={() => setProductToDelete(null)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!isDeleting) setProductToDelete(null);
+          }}
+        >
           <div
             className="modal-card delete-confirm-card"
             onClick={(e) => e.stopPropagation()}
@@ -896,10 +925,10 @@ export default function Products() {
                 <AlertTriangle size={24} />
               </div>
               <h3 id="delete-confirm-title" className="delete-confirm-title">
-                Delete Product?
+                Delete Product #{productToDelete.id}?
               </h3>
               <p className="delete-confirm-text">
-                Are you sure you want to delete this inventory item? This will remove it from the active catalog and inventory balances.
+                Are you sure you want to delete this inventory item from the database? This action will execute <code>DELETE /products/{productToDelete.id}</code> on the FastAPI backend.
                 <span className="delete-target-highlight">
                   {productToDelete.name} ({productToDelete.sku})
                 </span>
@@ -908,6 +937,7 @@ export default function Products() {
                 <Button
                   variant="outline"
                   size="md"
+                  disabled={isDeleting}
                   onClick={() => setProductToDelete(null)}
                 >
                   Cancel
@@ -916,9 +946,10 @@ export default function Products() {
                   variant="danger"
                   size="md"
                   icon={Trash2}
+                  disabled={isDeleting}
                   onClick={handleConfirmDelete}
                 >
-                  Delete Product
+                  {isDeleting ? 'Deleting...' : 'Delete Product'}
                 </Button>
               </div>
             </div>
