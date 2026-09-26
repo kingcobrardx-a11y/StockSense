@@ -54,7 +54,7 @@ class TransactionBase(BaseModel):
     product_id: int
     warehouse_id: int
     type: TransactionType
-    quantity: int = Field(..., gt=0, description="Quantity involved in the transaction")
+    quantity: int = Field(..., description="Quantity involved in the transaction")
     source_warehouse_id: Optional[int] = Field(None, description="Source warehouse for transfers")
     destination_warehouse_id: Optional[int] = Field(None, description="Destination warehouse for transfers")
     reference: Optional[str] = Field(None, description="Optional invoice, PO, or order reference")
@@ -71,7 +71,7 @@ class TransactionResponse(TransactionBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-# Inventory Operation Schemas (Receipt & Delivery)
+# Inventory Operation Schemas (Receipt, Delivery, Transfer, Adjustment)
 class ReceiptCreate(BaseModel):
     product_id: int = Field(..., description="ID of the product being received")
     warehouse_id: int = Field(..., description="ID of the warehouse receiving the stock")
@@ -86,9 +86,26 @@ class DeliveryCreate(BaseModel):
     reference: Optional[str] = Field(None, description="Sales order or delivery order reference")
 
 
+class TransferCreate(BaseModel):
+    product_id: int = Field(..., description="ID of the product being transferred")
+    source_warehouse_id: int = Field(..., description="ID of the source warehouse")
+    destination_warehouse_id: int = Field(..., description="ID of the destination warehouse")
+    quantity: int = Field(..., description="Quantity to transfer, must be greater than 0")
+    reference: Optional[str] = Field(None, description="Transfer reference")
+
+
+class AdjustmentCreate(BaseModel):
+    product_id: int = Field(..., description="ID of the product being adjusted")
+    warehouse_id: int = Field(..., description="ID of the warehouse")
+    quantity: int = Field(..., description="Adjustment quantity (positive or negative, cannot be 0)")
+    reference: Optional[str] = Field(None, description="Adjustment reference")
+
+
 class InventoryOperationResponse(BaseModel):
     message: str
     stock: StockDetailResponse
     transaction: TransactionResponse
+    destination_stock: Optional[StockDetailResponse] = Field(None, description="Destination warehouse stock for transfers")
 
     model_config = ConfigDict(from_attributes=True)
+

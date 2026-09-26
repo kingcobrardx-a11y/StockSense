@@ -13,6 +13,8 @@ from app.schemas.inventory import (
     StockDetailResponse,
     ReceiptCreate,
     DeliveryCreate,
+    TransferCreate,
+    AdjustmentCreate,
     InventoryOperationResponse,
     TransactionResponse,
 )
@@ -390,4 +392,276 @@ def create_delivery(delivery_in: DeliveryCreate, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process delivery: {str(exc)}"
+        )
+
+
+# ==========================================
+# Inventory Operations: Transfers & Adjustments
+# ==========================================
+
+@router.post(
+    "/inventory/transfers",
+    response_model=InventoryOperationResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Inventory Operations"],
+    summary="Create an inventory transfer",
+)
+@router.post(
+    "/transfers",
+    response_model=InventoryOperationResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Inventory Operations"],
+    include_in_schema=False,
+)
+def create_transfer(transfer_in: TransferCreate, db: Session = Depends(get_db)):
+    """
+    Record an inventory transfer between two warehouses:
+    1. Validates that product exists.
+    2. Validates that source and destination warehouses exist.
+    3. Validates that source and destination warehouses are different.
+    4. Validates that quantity > 0.
+    5. Validates that source stock exists and has sufficient quantity.
+    6. Decreases source warehouse stock by quantity.
+    7. Finds or creates destination stock row and increases it by quantity.
+    8. Creates a Transaction record with type TRANSFER.
+    9. Commits atomically or rolls back on any error.
+    """
+    # 1. Validate product
+    product = db.query(Product).filter(Product.id == transfer_in.product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with ID {transfer_in.product_id} not found."
+        )
+
+    # 2. Validate source warehouse
+    source_warehouse = db.query(Warehouse).filter(Warehouse.id == transfer_in.source_warehouse_id).first()
+    if not source_warehouse:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source warehouse with ID {transfer_in.source_warehouse_id} not found."
+        )
+
+    # 3. Validate destination warehouse
+    destination_warehouse = db.query(Warehouse).filter(Warehouse.id == transfer_in.destination_warehouse_id).first()
+    if not destination_warehouse:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Destination warehouse with ID {transfer_in.destination_warehouse_id} not found."
+        )
+
+    # 4. Source and destination warehouses must be different
+    if transfer_in.source_warehouse_id == transfer_in.destination_warehouse_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source and destination warehouses must be different."
+        )
+
+    # 5. Validate quantity
+    if transfer_in.quantity <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Quantity must be greater than 0."
+        )
+
+    try:
+        # 6. Find source stock record
+        source_stock = db.query(Stock).filter(
+            Stock.product_id == transfer_in.product_id,
+            Stock.warehouse_id == transfer_in.source_warehouse_id,
+        ).first()
+
+        if not source_stock:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No stock record found for product '{product.name}' in source warehouse '{source_warehouse.name}'."
+            )
+
+        # 7. Check sufficient available stock in source warehouse
+        if source_stock.quantity < transfer_in.quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient stock for '{product.name}' in source warehouse '{source_warehouse.name}'. Available: {source_stock.quantity}, requested: {transfer_in.quantity}."
+            )
+
+        # 8. Decrease source warehouse stock by quantity
+        source_stock.quantity -= transfer_in.quantity
+
+        # 9. Find or create destination stock row and increase by quantity
+        destination_stock = db.query(Stock).filter(
+            Stock.product_id == transfer_in.product_id,
+            Stock.warehouse_id == transfer_in.destination_warehouse_id,
+        ).first()
+
+        if not destination_stock:
+            destination_stock = Stock(
+                product_id=transfer_in.product_id,
+                warehouse_id=transfer_in.destination_warehouse_id,
+                quantity=transfer_in.quantity,
+            )
+            db.add(destination_stock)
+        else:
+            destination_stock.quantity += transfer_in.quantity
+
+        # 10. Create audit transaction record
+        tx = Transaction(
+            product_id=transfer_in.product_id,
+            warehouse_id=transfer_in.source_warehouse_id,
+            type=TransactionType.TRANSFER.value,
+            quantity=transfer_in.quantity,
+            source_warehouse_id=transfer_in.source_warehouse_id,
+            destination_warehouse_id=transfer_in.destination_warehouse_id,
+            reference=transfer_in.reference,
+        )
+        db.add(tx)
+
+        # 11. Atomically commit
+        db.commit()
+        db.refresh(source_stock)
+        db.refresh(destination_stock)
+        db.refresh(tx)
+
+        return InventoryOperationResponse(
+            message=f"Successfully transferred {transfer_in.quantity} units of '{product.name}' from '{source_warehouse.name}' to '{destination_warehouse.name}'.",
+            stock=StockDetailResponse(
+                id=source_stock.id,
+                product_id=product.id,
+                product_name=product.name,
+                sku=product.sku,
+                warehouse_id=source_warehouse.id,
+                warehouse_name=source_warehouse.name,
+                quantity=source_stock.quantity,
+            ),
+            destination_stock=StockDetailResponse(
+                id=destination_stock.id,
+                product_id=product.id,
+                product_name=product.name,
+                sku=product.sku,
+                warehouse_id=destination_warehouse.id,
+                warehouse_name=destination_warehouse.name,
+                quantity=destination_stock.quantity,
+            ),
+            transaction=TransactionResponse.model_validate(tx),
+        )
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process transfer: {str(exc)}"
+        )
+
+
+@router.post(
+    "/inventory/adjustments",
+    response_model=InventoryOperationResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Inventory Operations"],
+    summary="Create an inventory adjustment",
+)
+@router.post(
+    "/adjustments",
+    response_model=InventoryOperationResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Inventory Operations"],
+    include_in_schema=False,
+)
+def create_adjustment(adjustment_in: AdjustmentCreate, db: Session = Depends(get_db)):
+    """
+    Record an inventory adjustment:
+    1. Validates that product exists.
+    2. Validates that warehouse exists.
+    3. Validates that adjustment quantity != 0.
+    4. Validates that stock record exists.
+    5. Calculates new_stock = current_stock + adjustment_quantity.
+    6. Rejects operation if new_stock < 0.
+    7. Updates stock quantity.
+    8. Creates a Transaction record with type ADJUSTMENT.
+    9. Commits atomically or rolls back on any error.
+    """
+    # 1. Validate product
+    product = db.query(Product).filter(Product.id == adjustment_in.product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with ID {adjustment_in.product_id} not found."
+        )
+
+    # 2. Validate warehouse
+    warehouse = db.query(Warehouse).filter(Warehouse.id == adjustment_in.warehouse_id).first()
+    if not warehouse:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Warehouse with ID {adjustment_in.warehouse_id} not found."
+        )
+
+    # 3. Validate quantity cannot be 0
+    if adjustment_in.quantity == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Adjustment quantity cannot be 0."
+        )
+
+    try:
+        # 4. Stock row must exist
+        stock = db.query(Stock).filter(
+            Stock.product_id == adjustment_in.product_id,
+            Stock.warehouse_id == adjustment_in.warehouse_id,
+        ).first()
+
+        if not stock:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No stock record found for product '{product.name}' in warehouse '{warehouse.name}'."
+            )
+
+        # 5 & 6. Calculate new_stock and reject if negative
+        new_stock = stock.quantity + adjustment_in.quantity
+        if new_stock < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Adjustment of {adjustment_in.quantity} would result in negative stock ({new_stock}). Current stock is {stock.quantity}."
+            )
+
+        # 7. Update stock quantity
+        stock.quantity = new_stock
+
+        # 8. Create audit transaction record
+        tx = Transaction(
+            product_id=adjustment_in.product_id,
+            warehouse_id=adjustment_in.warehouse_id,
+            type=TransactionType.ADJUSTMENT.value,
+            quantity=adjustment_in.quantity,
+            reference=adjustment_in.reference,
+        )
+        db.add(tx)
+
+        # 9. Atomically commit
+        db.commit()
+        db.refresh(stock)
+        db.refresh(tx)
+
+        return InventoryOperationResponse(
+            message=f"Successfully adjusted stock for '{product.name}' in '{warehouse.name}' by {adjustment_in.quantity:+d} units (new quantity: {stock.quantity}).",
+            stock=StockDetailResponse(
+                id=stock.id,
+                product_id=product.id,
+                product_name=product.name,
+                sku=product.sku,
+                warehouse_id=warehouse.id,
+                warehouse_name=warehouse.name,
+                quantity=stock.quantity,
+            ),
+            transaction=TransactionResponse.model_validate(tx),
+        )
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process adjustment: {str(exc)}"
         )
