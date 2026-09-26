@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Package,
@@ -15,14 +15,15 @@ import {
   PlusCircle,
   FileSpreadsheet,
   CheckCircle2,
-  DollarSign
+  DollarSign,
+  RotateCcw
 } from 'lucide-react';
 import StatCard from '../components/ui/StatCard';
 import DataTable from '../components/ui/DataTable';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import { dashboardService } from '../services/api';
 import {
-  initialStats,
   mockProducts,
   mockLedger,
   mockReceipts,
@@ -33,19 +34,137 @@ import './Dashboard.css';
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [dashboardData, setDashboardData] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Fetch dashboard summary from FastAPI backend
+  const fetchDashboardData = useCallback(async (isManualRefresh = false) => {
+    if (isManualRefresh) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
+    setFetchError(null);
+
+    try {
+      const data = await dashboardService.getDashboard();
+      setDashboardData(data || {});
+    } catch (err) {
+      console.error('Failed to load dashboard telemetry:', err);
+      setFetchError(err.message || 'Unable to connect to StockSense API');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadInitial() {
+      setIsLoading(true);
+      setFetchError(null);
+      try {
+        const data = await dashboardService.getDashboard();
+        if (!ignore) {
+          setDashboardData(data || {});
+        }
+      } catch (err) {
+        if (!ignore) {
+          console.error('Failed to load dashboard telemetry:', err);
+          setFetchError(err.message || 'Unable to connect to StockSense API');
+        }
+      } finally {
+        if (!ignore) {
+          setIsLoading(false);
+        }
+      }
+    }
+    loadInitial();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const handleRefresh = () => {
+    fetchDashboardData(true);
+  };
+
+  // Helper to safely parse API numeric values, safely falling back to 0
+  const safeNumber = (val) => {
+    if (val === null || val === undefined) return 0;
+    const num = Number(val);
+    return Number.isNaN(num) ? 0 : num;
+  };
+
+  // KPI Mappings from real backend response
+  const totalProductsInStock = safeNumber(
+    dashboardData?.total_products_in_stock ??
+    dashboardData?.totalProductsInStock ??
+    dashboardData?.total_products ??
+    dashboardData?.totalProducts ??
+    dashboardData?.total_stock_units ??
+    0
+  );
+
+  const totalWarehouses = safeNumber(
+    dashboardData?.total_warehouses ??
+    dashboardData?.totalWarehouses ??
+    0
+  );
+
+  const lowStockCount = safeNumber(
+    dashboardData?.low_stock_count ??
+    dashboardData?.lowStockCount ??
+    dashboardData?.low_stock ??
+    dashboardData?.lowStock ??
+    0
+  );
+
+  const outOfStockCount = safeNumber(
+    dashboardData?.out_of_stock_count ??
+    dashboardData?.outOfStockCount ??
+    dashboardData?.out_of_stock ??
+    dashboardData?.outOfStock ??
+    0
+  );
+
+  const lowAndOutOfStock = safeNumber(
+    dashboardData?.low_and_out_of_stock ??
+    dashboardData?.lowAndOutOfStock ??
+    (lowStockCount + outOfStockCount)
+  );
+
+  const pendingReceipts = safeNumber(
+    dashboardData?.pending_receipts ??
+    dashboardData?.pendingReceipts ??
+    dashboardData?.pending_receipts_count ??
+    dashboardData?.pendingReceiptsCount ??
+    0
+  );
+
+  const pendingDeliveries = safeNumber(
+    dashboardData?.pending_deliveries ??
+    dashboardData?.pendingDeliveries ??
+    dashboardData?.pending_deliveries_count ??
+    dashboardData?.pendingDeliveriesCount ??
+    0
+  );
+
+  const internalTransfers = safeNumber(
+    dashboardData?.internal_transfers ??
+    dashboardData?.internalTransfers ??
+    dashboardData?.internal_transfers_active ??
+    dashboardData?.internalTransfersActive ??
+    dashboardData?.active_transfers ??
+    0
+  );
 
   // Filter low and out of stock products
   const criticalStockItems = mockProducts.filter(
     (p) => p.status === 'Low Stock' || p.status === 'Out of Stock'
   );
-
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    setTimeout(() => {
-      setIsRefreshing(false);
-    }, 600);
-  };
 
   // Recent transactions table columns
   const transactionColumns = [
@@ -130,6 +249,7 @@ export default function Dashboard() {
             size="md"
             icon={RefreshCw}
             className={isRefreshing ? 'spin-anim' : ''}
+            disabled={isRefreshing || isLoading}
             onClick={handleRefresh}
           >
             {isRefreshing ? 'Syncing...' : 'Sync Telemetry'}
@@ -146,69 +266,114 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* KPI Stat Cards Grid */}
-      <div className="stat-grid">
-        {/* 1. Total Products in Stock */}
-        <StatCard
-          title="Total Products in Stock"
-          value={initialStats.totalProducts.toLocaleString()}
-          subtitle="Across 3 fulfillment hubs"
-          icon={Package}
-          accent="blue"
-          change="+8.4% MoM"
-          changeType="positive"
-          onClick={() => navigate('/products')}
-        />
+      {/* KPI Stat Cards Grid with Loading, Error, and Content States */}
+      {fetchError && dashboardData && (
+        <div className="dashboard-error-card">
+          <div className="dashboard-error-icon">
+            <AlertTriangle size={22} />
+          </div>
+          <div className="dashboard-error-title">Sync Telemetry Failed</div>
+          <p className="dashboard-error-msg">{fetchError}</p>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={RotateCcw}
+            onClick={() => fetchDashboardData(true)}
+          >
+            Retry Sync
+          </Button>
+        </div>
+      )}
 
-        {/* 2. Low / Out of Stock Items */}
-        <StatCard
-          title="Low & Out of Stock"
-          value={initialStats.lowStockCount + initialStats.outOfStockCount}
-          subtitle={`${initialStats.outOfStockCount} critical out of stock`}
-          icon={AlertTriangle}
-          accent="rose"
-          change="Action required"
-          changeType="negative"
-          badge={`${initialStats.outOfStockCount} Zero Stock`}
-          onClick={() => navigate('/products')}
-        />
+      {isLoading && !dashboardData ? (
+        <div className="dashboard-loading-card">
+          <div className="loading-spinner" />
+          <div className="loading-text">Loading dashboard telemetry from StockSense API...</div>
+        </div>
+      ) : fetchError && !dashboardData ? (
+        <div className="dashboard-error-card">
+          <div className="dashboard-error-icon">
+            <AlertTriangle size={24} />
+          </div>
+          <div className="dashboard-error-title">Unable to Connect to FastAPI Backend</div>
+          <p className="dashboard-error-msg">{fetchError}</p>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={RotateCcw}
+            onClick={() => fetchDashboardData(false)}
+          >
+            Retry Connection
+          </Button>
+        </div>
+      ) : (
+        <div className="stat-grid">
+          {/* 1. Total Products in Stock */}
+          <StatCard
+            title="Total Products in Stock"
+            value={totalProductsInStock.toLocaleString()}
+            subtitle={
+              totalWarehouses > 0
+                ? `Across ${totalWarehouses} fulfillment hub${totalWarehouses === 1 ? '' : 's'}`
+                : 'Across fulfillment hubs'
+            }
+            icon={Package}
+            accent="blue"
+            change={totalProductsInStock > 0 ? `${totalProductsInStock} in catalog` : '0 in catalog'}
+            changeType="positive"
+            onClick={() => navigate('/products')}
+          />
 
-        {/* 3. Pending Receipts */}
-        <StatCard
-          title="Pending Receipts"
-          value={initialStats.pendingReceipts}
-          subtitle="4 arriving before 4:00 PM"
-          icon={ArrowDownToLine}
-          accent="amber"
-          change="8 Expected POs"
-          changeType="warning"
-          onClick={() => navigate('/operations/receipts')}
-        />
+          {/* 2. Low / Out of Stock Items */}
+          <StatCard
+            title="Low & Out of Stock"
+            value={lowAndOutOfStock}
+            subtitle={`${outOfStockCount} critical out of stock`}
+            icon={AlertTriangle}
+            accent="rose"
+            change={lowAndOutOfStock > 0 ? 'Action required' : 'Stock level healthy'}
+            changeType={lowAndOutOfStock > 0 ? 'negative' : 'positive'}
+            badge={`${outOfStockCount} Zero Stock`}
+            onClick={() => navigate('/products')}
+          />
 
-        {/* 4. Pending Deliveries */}
-        <StatCard
-          title="Pending Deliveries"
-          value={initialStats.pendingDeliveries}
-          subtitle="5 Urgent outbound priority"
-          icon={Truck}
-          accent="purple"
-          change="12 Active DOs"
-          changeType="positive"
-          onClick={() => navigate('/operations/deliveries')}
-        />
+          {/* 3. Pending Receipts */}
+          <StatCard
+            title="Pending Receipts"
+            value={pendingReceipts}
+            subtitle={pendingReceipts > 0 ? `${pendingReceipts} incoming arrivals` : 'No pending receipts'}
+            icon={ArrowDownToLine}
+            accent="amber"
+            change={`${pendingReceipts} Expected POs`}
+            changeType={pendingReceipts > 0 ? 'warning' : 'neutral'}
+            onClick={() => navigate('/operations/receipts')}
+          />
 
-        {/* 5. Internal Transfers */}
-        <StatCard
-          title="Internal Transfers"
-          value={initialStats.internalTransfersActive}
-          subtitle="Inter-bay and inter-facility"
-          icon={ArrowLeftRight}
-          accent="emerald"
-          change="6 Active Move Jobs"
-          changeType="positive"
-          onClick={() => navigate('/operations/transfers')}
-        />
-      </div>
+          {/* 4. Pending Deliveries */}
+          <StatCard
+            title="Pending Deliveries"
+            value={pendingDeliveries}
+            subtitle={pendingDeliveries > 0 ? `${pendingDeliveries} active dispatches` : 'No pending deliveries'}
+            icon={Truck}
+            accent="purple"
+            change={`${pendingDeliveries} Active DOs`}
+            changeType={pendingDeliveries > 0 ? 'positive' : 'neutral'}
+            onClick={() => navigate('/operations/deliveries')}
+          />
+
+          {/* 5. Internal Transfers */}
+          <StatCard
+            title="Internal Transfers"
+            value={internalTransfers}
+            subtitle="Inter-bay and inter-facility"
+            icon={ArrowLeftRight}
+            accent="emerald"
+            change={`${internalTransfers} Active Move Jobs`}
+            changeType={internalTransfers > 0 ? 'positive' : 'neutral'}
+            onClick={() => navigate('/operations/transfers')}
+          />
+        </div>
+      )}
 
       {/* Middle Grid: Low Stock Alert Section + Operations Overview */}
       <div className="dashboard-grid-2col">

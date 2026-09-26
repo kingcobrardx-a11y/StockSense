@@ -91,3 +91,32 @@ export const productService = {
   // GET /stock
   getStock: () => request('/stock'),
 };
+
+export const dashboardService = {
+  // GET /dashboard (with fallback to /dashboard/summary if /dashboard returns 404)
+  getDashboard: async () => {
+    try {
+      return await request('/dashboard');
+    } catch (err) {
+      if (err.status === 404) {
+        return await request('/dashboard/summary');
+      }
+      throw err;
+    }
+  },
+
+  // GET /dashboard/summary
+  getSummary: async () => {
+    try {
+      return await request('/dashboard/summary');
+    } catch (err) {
+      if (err.status === 404) {
+        return await request('/dashboard');
+      }
+      throw err;
+    }
+  },
+};
+
+export const getDashboard = dashboardService.getDashboard;
+
