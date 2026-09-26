@@ -229,12 +229,19 @@ export function DashboardView({
                       </TableCell>
                       <TableCell>
                         {tx.type === 'TRANSFER' ? (
-                          <span className="transfer-route">
-                            {getWarehouseName(tx.source_warehouse_id || tx.warehouse_id)} &rarr;{' '}
-                            {getWarehouseName(tx.destination_warehouse_id)}
-                          </span>
+                          <div className="transfer-route-display">
+                            <span className="source-wh">
+                              {getWarehouseName(tx.source_warehouse_id || tx.warehouse_id)}
+                            </span>
+                            <span className="route-arrow">&rarr;</span>
+                            <span className="dest-wh">
+                              {getWarehouseName(tx.destination_warehouse_id)}
+                            </span>
+                          </div>
                         ) : (
-                          getWarehouseName(tx.warehouse_id)
+                          <span className="warehouse-badge">
+                            {getWarehouseName(tx.warehouse_id)}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell align="right">
@@ -248,7 +255,7 @@ export function DashboardView({
                           }
                         >
                           {tx.type === 'RECEIPT' ? '+' : tx.type === 'DELIVERY' ? '-' : ''}
-                          {tx.quantity}
+                          {(tx.quantity || 0).toLocaleString()}
                         </span>
                       </TableCell>
                       <TableCell>

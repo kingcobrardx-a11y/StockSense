@@ -10,7 +10,7 @@ export function LoginView({ onNavigate }) {
   const { success } = useToast();
 
   const [email, setEmail] = useState('sarah.jenkins@stocksense.io');
-  const [password, setPassword] = useState('••••••••••••');
+  const [password, setPassword] = useState('demopassword123');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = (e) => {

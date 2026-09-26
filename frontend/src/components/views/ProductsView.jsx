@@ -58,7 +58,7 @@ export function ProductsView({
   if (loading) {
     return (
       <div className="view-container">
-        <SkeletonTable rows={6} cols={7} />
+        <SkeletonTable rows={6} cols={8} />
       </div>
     );
   }
@@ -83,6 +83,7 @@ export function ProductsView({
             <div className="search-bar-wrapper">
               <Input
                 placeholder="Search products by SKU or name..."
+                aria-label="Search products by SKU or name"
                 icon="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -93,6 +94,7 @@ export function ProductsView({
             <div className="filter-select-wrapper">
               <Select
                 value={categoryFilter}
+                aria-label="Filter products by category"
                 onChange={(e) => setCategoryFilter(e.target.value)}
                 wrapperClassName="category-select-group"
               >
@@ -167,11 +169,11 @@ export function ProductsView({
                       <span className="unit-label">{product.unit || 'pcs'}</span>
                     </TableCell>
                     <TableCell align="right">
-                      <span className="stock-qty-value">{product.totalQuantity}</span>
+                      <span className="stock-qty-value">{(product.totalQuantity || 0).toLocaleString()}</span>
                     </TableCell>
                     <TableCell align="right">
                       <span className="reorder-level-value">
-                        {product.reorder_level || 0}
+                        {(product.reorder_level || 0).toLocaleString()}
                       </span>
                     </TableCell>
                     <TableCell>

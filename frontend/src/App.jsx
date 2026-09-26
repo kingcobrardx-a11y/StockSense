@@ -321,6 +321,15 @@ function AppContent() {
               >
                 Record Adjustment
               </Button>
+            ) : currentView === 'ledger' ? (
+              <Button
+                variant="primary"
+                size="sm"
+                icon="plus"
+                onClick={() => handleOpenTransactionModal('RECEIPT')}
+              >
+                Record Transaction
+              </Button>
             ) : (
               <Button
                 variant="primary"
@@ -328,7 +337,7 @@ function AppContent() {
                 icon="arrow-down-left"
                 onClick={() => handleOpenTransactionModal('RECEIPT')}
               >
-                Quick Action
+                Receive Stock
               </Button>
             )
           }

@@ -19,6 +19,8 @@ export function Header({
         {/* Backend API Health Status Indicator */}
         <div
           className={`api-status-pill ${isApiHealthy ? 'api-online' : 'api-offline'}`}
+          role="status"
+          aria-live="polite"
           title={
             isApiHealthy
               ? 'Connected to StockSense FastAPI Backend'

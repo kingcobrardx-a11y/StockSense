@@ -163,7 +163,7 @@ export function TransactionModal({
             Cancel
           </Button>
           <Button
-            variant={formData.type === 'DELIVERY' ? 'primary' : 'primary'}
+            variant="primary"
             onClick={handleSubmit}
             loading={loading}
             icon={
@@ -260,11 +260,14 @@ export function TransactionModal({
               ))}
             </Select>
           ) : (
-            <div className="stock-info-card">
-              <span className="stock-info-label">Available In Selected Warehouse:</span>
-              <span className="stock-info-qty">
-                {currentQuantity} {selectedProduct?.unit || 'units'}
-              </span>
+            <div className="form-group">
+              <span className="form-label">Available Stock</span>
+              <div className="stock-info-card">
+                <span className="stock-info-label">Current on hand:</span>
+                <span className="stock-info-qty">
+                  {currentQuantity} {selectedProduct?.unit || 'units'}
+                </span>
+              </div>
             </div>
           )}
         </div>

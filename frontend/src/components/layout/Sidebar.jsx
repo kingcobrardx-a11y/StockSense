@@ -81,6 +81,8 @@ export function Sidebar({ currentView, onNavigate, counts = {} }) {
                   className={`nav-link ${isActive ? 'nav-link-active' : ''}`}
                   onClick={() => onNavigate(item.id)}
                   aria-current={isActive ? 'page' : undefined}
+                  title={`${item.label} - ${item.description}`}
+                  aria-label={item.label}
                 >
                   <span className="nav-icon">
                     <Icon name={item.icon} size={18} />

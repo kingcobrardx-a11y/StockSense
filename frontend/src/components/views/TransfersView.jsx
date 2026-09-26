@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Card, CardHeader, CardContent } from '../common/Card';
 import { Button } from '../common/Button';
 import { Input } from '../common/Input';
+import { Badge } from '../common/Badge';
 import { Table, TableHead, TableBody, TableRow, TableHeaderCell, TableCell } from '../common/Table';
 import { SkeletonTable } from '../common/Skeleton';
 import { EmptyState } from '../common/EmptyState';
@@ -92,6 +93,7 @@ export function TransfersView({
             <div className="search-bar-wrapper">
               <Input
                 placeholder="Search by transfer note, waybill, product..."
+                aria-label="Search transfers by waybill or product"
                 icon="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -160,11 +162,11 @@ export function TransfersView({
                     </TableCell>
                     <TableCell align="right">
                       <span className="qty-neutral">
-                        {tx.quantity} {getProductUnit(tx.product_id)}
+                        {(tx.quantity || 0).toLocaleString()} {getProductUnit(tx.product_id)}
                       </span>
                     </TableCell>
                     <TableCell>
-                      <span className="badge badge-transfer">Transferred</span>
+                      <Badge variant="transfer" dot>Transferred</Badge>
                     </TableCell>
                   </TableRow>
                 ))}

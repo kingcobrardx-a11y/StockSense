@@ -140,6 +140,7 @@ export function LedgerView({
             <div className="search-bar-wrapper">
               <Input
                 placeholder="Search audit trail by reference, SKU, product..."
+                aria-label="Search audit trail by reference, SKU, or product"
                 icon="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -150,6 +151,7 @@ export function LedgerView({
             <div className="filter-select-wrapper">
               <Select
                 value={typeFilter}
+                aria-label="Filter by transaction type"
                 onChange={(e) => setTypeFilter(e.target.value)}
                 wrapperClassName="type-select-group"
               >
@@ -164,6 +166,7 @@ export function LedgerView({
             <div className="filter-select-wrapper">
               <Select
                 value={warehouseFilter}
+                aria-label="Filter by warehouse"
                 onChange={(e) => setWarehouseFilter(e.target.value)}
                 wrapperClassName="warehouse-select-group"
               >
@@ -285,12 +288,12 @@ export function LedgerView({
                         }
                       >
                         {tx.type === 'RECEIPT'
-                          ? `+${tx.quantity}`
+                          ? `+${(tx.quantity || 0).toLocaleString()}`
                           : tx.type === 'DELIVERY'
-                          ? `-${tx.quantity}`
+                          ? `-${(tx.quantity || 0).toLocaleString()}`
                           : tx.type === 'ADJUSTMENT'
-                          ? `Count: ${tx.quantity}`
-                          : tx.quantity}{' '}
+                          ? `Count: ${(tx.quantity || 0).toLocaleString()}`
+                          : (tx.quantity || 0).toLocaleString()}{' '}
                         {getProductUnit(tx.product_id)}
                       </span>
                     </TableCell>

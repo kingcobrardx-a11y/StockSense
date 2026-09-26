@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Card, CardHeader, CardContent } from '../common/Card';
 import { Button } from '../common/Button';
 import { Input } from '../common/Input';
+import { Badge } from '../common/Badge';
 import { Table, TableHead, TableBody, TableRow, TableHeaderCell, TableCell } from '../common/Table';
 import { SkeletonTable } from '../common/Skeleton';
 import { EmptyState } from '../common/EmptyState';
@@ -92,6 +93,7 @@ export function AdjustmentsView({
             <div className="search-bar-wrapper">
               <Input
                 placeholder="Search audit note, cycle count, product..."
+                aria-label="Search adjustments by audit note or product"
                 icon="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -152,11 +154,11 @@ export function AdjustmentsView({
                     </TableCell>
                     <TableCell align="right">
                       <span className="qty-adjustment">
-                        {tx.quantity} {getProductUnit(tx.product_id)}
+                        {(tx.quantity || 0).toLocaleString()} {getProductUnit(tx.product_id)}
                       </span>
                     </TableCell>
                     <TableCell>
-                      <span className="badge badge-adjustment">Audited & Applied</span>
+                      <Badge variant="adjustment" dot>Audited</Badge>
                     </TableCell>
                   </TableRow>
                 ))}

@@ -43,6 +43,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
+        aria-describedby={description ? 'modal-description' : undefined}
         ref={modalRef}
       >
         <div className="modal-header">
@@ -50,7 +51,7 @@ export function Modal({
             <h2 id="modal-title" className="modal-title">
               {title}
             </h2>
-            {description && <p className="modal-description">{description}</p>}
+            {description && <p id="modal-description" className="modal-description">{description}</p>}
           </div>
           <button
             type="button"
