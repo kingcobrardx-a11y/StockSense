@@ -1,65 +1,112 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ScrollText,
   Download,
   Filter,
-  ArrowDownLeft,
-  ArrowUpRight,
-  Repeat,
-  AlertCircle,
-  FileCheck,
+  RefreshCw,
   Search
 } from 'lucide-react';
 import DataTable from '../components/ui/DataTable';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
+import LoadingSpinner from '../components/LoadingSpinner';
+import EmptyState from '../components/EmptyState';
 import { mockLedger } from '../data/mockData';
+import { fetchLedgerTransactions, fetchWarehouses } from '../services/api';
 
 export default function StockLedger() {
   const [ledger, setLedger] = useState(mockLedger);
+  const [warehouses, setWarehouses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('All');
+  const [warehouseFilter, setWarehouseFilter] = useState('All');
 
-  const filtered = ledger.filter((item) => {
-    const matchSearch =
-      item.id.toLowerCase().includes(search.toLowerCase()) ||
-      item.sku.toLowerCase().includes(search.toLowerCase()) ||
-      item.productName.toLowerCase().includes(search.toLowerCase()) ||
-      item.referenceDoc.toLowerCase().includes(search.toLowerCase()) ||
-      item.operator.toLowerCase().includes(search.toLowerCase());
-    const matchType = typeFilter === 'All' || item.type === typeFilter;
-    return matchSearch && matchType;
-  });
+  const loadLedgerData = async () => {
+    try {
+      const [txData, whData] = await Promise.all([
+        fetchLedgerTransactions(),
+        fetchWarehouses(),
+      ]);
+
+      if (Array.isArray(txData) && txData.length > 0) {
+        // Map backend transaction schema to ledger row if coming from live API
+        const formatted = txData.map((t) => {
+          if (t.productName) return t; // Already formatted mock
+          const isPositive = t.type === 'RECEIPT' || (t.type === 'ADJUSTMENT' && t.quantity > 0);
+          return {
+            id: `TXN-${String(t.id).padStart(4, '0')}`,
+            timestamp: t.created_at ? new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '10:30 AM',
+            type: t.type,
+            productName: t.product_name || `Product #${t.product_id}`,
+            sku: t.sku || `SKU-${t.product_id}`,
+            quantityChange: t.type === 'TRANSFER' ? `${t.quantity}` : `${isPositive ? '+' : ''}${t.quantity}`,
+            balanceAfter: '--',
+            warehouse: t.warehouse_name || (t.warehouse_id === 1 ? 'Main Warehouse' : 'Production Unit'),
+            referenceDoc: t.reference || 'SYSTEM',
+            operator: 'Admin',
+          };
+        });
+        setLedger(formatted);
+      } else {
+        setLedger(mockLedger);
+      }
+      setWarehouses(whData || []);
+    } catch {
+      setLedger(mockLedger);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLedgerData();
+  }, []);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadLedgerData();
+  };
+
+  const filtered = useMemo(() => {
+    return ledger.filter((item) => {
+      // Search
+      const q = search.toLowerCase();
+      const matchSearch =
+        (item.id || '').toLowerCase().includes(q) ||
+        (item.sku || '').toLowerCase().includes(q) ||
+        (item.productName || '').toLowerCase().includes(q) ||
+        (item.referenceDoc || '').toLowerCase().includes(q) ||
+        (item.warehouse || '').toLowerCase().includes(q);
+
+      // Type filter
+      let matchType = true;
+      if (typeFilter !== 'All') {
+        matchType = (item.type || '').toUpperCase() === typeFilter.toUpperCase();
+      }
+
+      // Warehouse filter
+      let matchWh = true;
+      if (warehouseFilter !== 'All') {
+        matchWh = (item.warehouse || '').toLowerCase().includes(warehouseFilter.toLowerCase());
+      }
+
+      return matchSearch && matchType && matchWh;
+    });
+  }, [ledger, search, typeFilter, warehouseFilter]);
 
   const columns = [
     {
-      header: 'Txn ID',
-      accessor: 'id',
-      width: '120px',
-      render: (row) => <span className="font-mono font-semibold text-cyan">{row.id}</span>,
-    },
-    {
-      header: 'Timestamp',
+      header: 'Time',
       accessor: 'timestamp',
-      width: '170px',
+      width: '100px',
       render: (row) => <span className="text-secondary text-xs font-mono">{row.timestamp}</span>,
     },
     {
-      header: 'Type',
-      accessor: 'type',
-      width: '140px',
-      render: (row) => {
-        let variant = 'info';
-        if (row.type === 'RECEIPT') variant = 'success';
-        if (row.type === 'DELIVERY') variant = 'purple';
-        if (row.type.includes('TRANSFER')) variant = 'warning';
-        if (row.type === 'ADJUSTMENT') variant = 'danger';
-        return <Badge variant={variant} dot size="sm">{row.type.replace('_', ' ')}</Badge>;
-      },
-    },
-    {
-      header: 'Product & SKU',
+      header: 'Product',
       accessor: 'productName',
       render: (row) => (
         <div>
@@ -69,39 +116,56 @@ export default function StockLedger() {
       ),
     },
     {
-      header: 'Quantity Change',
+      header: 'Type',
+      accessor: 'type',
+      width: '110px',
+      render: (row) => {
+        let variant = 'info';
+        let label = row.type;
+        if (row.type === 'RECEIPT') {
+          variant = 'success';
+          label = 'IN';
+        } else if (row.type === 'DELIVERY') {
+          variant = 'danger';
+          label = 'OUT';
+        } else if (row.type.includes('TRANSFER')) {
+          variant = 'warning';
+          label = 'MOVE';
+        } else if (row.type === 'ADJUSTMENT') {
+          variant = 'purple';
+          label = 'ADJ';
+        }
+        return <Badge variant={variant} dot size="sm">{label}</Badge>;
+      },
+    },
+    {
+      header: 'Qty',
       accessor: 'quantityChange',
       align: 'right',
-      render: (row) => (
-        <span
-          className={`font-mono font-bold ${
-            row.quantityChange.startsWith('+') ? 'text-emerald' : 'text-rose'
-          }`}
-        >
-          {row.quantityChange}
-        </span>
-      ),
+      render: (row) => {
+        const changeStr = String(row.quantityChange);
+        const isPos = changeStr.startsWith('+');
+        const isNeg = changeStr.startsWith('-');
+        return (
+          <span
+            className={`font-mono font-bold ${
+              isPos ? 'text-emerald' : isNeg ? 'text-rose' : 'text-cyan'
+            }`}
+          >
+            {changeStr}
+          </span>
+        );
+      },
     },
     {
-      header: 'Balance After',
-      accessor: 'balanceAfter',
-      align: 'right',
-      render: (row) => <span className="font-mono font-semibold text-white">{row.balanceAfter}</span>,
+      header: 'Warehouse',
+      accessor: 'warehouse',
+      render: (row) => <span className="text-secondary text-xs">{row.warehouse}</span>,
     },
     {
-      header: 'Ref Document',
+      header: 'Reference',
       accessor: 'referenceDoc',
       render: (row) => <span className="badge-pill badge-neutral badge-sm font-mono">{row.referenceDoc}</span>,
-    },
-    {
-      header: 'Hub / Operator',
-      accessor: 'operator',
-      render: (row) => (
-        <div>
-          <span className="text-white text-xs font-medium">{row.warehouse}</span>
-          <div className="text-muted text-xs">{row.operator}</div>
-        </div>
-      ),
     },
   ];
 
@@ -111,77 +175,90 @@ export default function StockLedger() {
         <div className="page-title-group">
           <h1>
             <ScrollText size={24} className="text-cyan" />
-            <span>Immutable Stock Ledger & Audit Log</span>
+            <span>Stock Ledger & Audit Trail</span>
           </h1>
-          <p>Cryptographically aligned, chronological double-entry record of every unit moving through the network.</p>
+          <p>Chronological immutable record of every inventory receipt, delivery, transfer, and adjustment.</p>
         </div>
 
         <div className="page-actions">
           <Button
             variant="outline"
             size="md"
-            icon={Download}
-            onClick={() => alert('Stock Ledger exported as CSV.')}
+            icon={RefreshCw}
+            className={refreshing ? 'spin-anim' : ''}
+            onClick={handleRefresh}
           >
-            Export CSV Audit
+            {refreshing ? 'Refreshing...' : 'Refresh Ledger'}
           </Button>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="products-kpi-bar">
-        <div className="kpi-mini">
-          <span className="kpi-mini-title">Total Logged Entries</span>
-          <span className="kpi-mini-val text-white">{ledger.length}</span>
-        </div>
-        <div className="kpi-mini">
-          <span className="kpi-mini-title">Inbound Receipts</span>
-          <span className="kpi-mini-val text-emerald">
-            {ledger.filter((l) => l.type === 'RECEIPT').length}
-          </span>
-        </div>
-        <div className="kpi-mini">
-          <span className="kpi-mini-title">Outbound Deliveries</span>
-          <span className="kpi-mini-val text-purple">
-            {ledger.filter((l) => l.type === 'DELIVERY').length}
-          </span>
-        </div>
-        <div className="kpi-mini">
-          <span className="kpi-mini-title">Audits / Adjusts</span>
-          <span className="kpi-mini-val text-amber">
-            {ledger.filter((l) => l.type === 'ADJUSTMENT').length}
-          </span>
-        </div>
-      </div>
-
       {/* Search and Filters */}
-      <div className="products-controls-bar">
+      <div className="products-controls-bar" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
         <SearchBar
           value={search}
           onChange={setSearch}
-          placeholder="Search by Txn ID, SKU, product, PO/DO ref, or operator..."
+          placeholder="Filter by product, SKU, reference, or warehouse..."
+          width="320px"
         />
 
-        <div className="filter-pill-group">
-          {['All', 'RECEIPT', 'DELIVERY', 'TRANSFER_OUT', 'ADJUSTMENT'].map((type) => (
-            <button
-              key={type}
-              type="button"
-              className={`filter-pill ${typeFilter === type ? 'filter-pill-active' : ''}`}
-              onClick={() => setTypeFilter(type)}
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Filter by Type */}
+          <div className="filter-dropdown-wrap">
+            <label className="filter-label" style={{ fontSize: '0.8125rem', color: '#94a3b8' }}>Type:</label>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="filter-select"
             >
-              {type === 'TRANSFER_OUT' ? 'TRANSFER' : type}
-            </button>
-          ))}
+              <option value="All">All Types</option>
+              <option value="RECEIPT">Receipt (IN)</option>
+              <option value="DELIVERY">Delivery (OUT)</option>
+              <option value="TRANSFER">Transfer (MOVE)</option>
+              <option value="ADJUSTMENT">Adjustment (ADJ)</option>
+            </select>
+          </div>
+
+          {/* Filter by Warehouse */}
+          <div className="filter-dropdown-wrap">
+            <label className="filter-label" style={{ fontSize: '0.8125rem', color: '#94a3b8' }}>Warehouse:</label>
+            <select
+              value={warehouseFilter}
+              onChange={(e) => setWarehouseFilter(e.target.value)}
+              className="filter-select"
+            >
+              <option value="All">All Warehouses</option>
+              {warehouses.map((wh) => (
+                <option key={wh.id} value={wh.name}>
+                  {wh.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
       {/* Data Table */}
-      <DataTable
-        columns={columns}
-        data={filtered}
-        emptyMessage="No ledger transactions found matching criteria."
-      />
+      {loading ? (
+        <LoadingSpinner message="Loading audit ledger records..." fullPage />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title="No ledger events match the current filter"
+          description="Try broadening your search or resetting the active type filter."
+          actionLabel="Reset Filters"
+          onAction={() => {
+            setSearch('');
+            setTypeFilter('All');
+            setWarehouseFilter('All');
+          }}
+        />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={filtered}
+          emptyMessage="No audit ledger records match the query."
+        />
+      )}
     </div>
   );
 }
