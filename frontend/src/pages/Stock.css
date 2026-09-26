@@ -1,0 +1,108 @@
+.stock-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.stock-controls-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: #ffffff;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.stock-filters-row {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.filter-dropdown-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filter-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.filter-select {
+  height: 38px;
+  padding: 0 1rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.filter-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.stock-product-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.stock-product-name {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.stock-product-sub {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.stock-sku-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.stock-warehouse-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: #334155;
+  font-weight: 500;
+}
+
+.wh-icon {
+  color: #64748b;
+}
+
+.stock-quantity-val {
+  color: #0f172a;
+  font-size: 0.875rem;
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

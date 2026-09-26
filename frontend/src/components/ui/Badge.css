@@ -1,0 +1,92 @@
+.badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  border-radius: 9999px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  line-height: 1;
+}
+
+.badge-sm {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.badge-md {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+/* Success */
+.badge-success {
+  background-color: var(--success-bg);
+  color: #34d399;
+  border-color: var(--success-border);
+}
+.dot-success {
+  background-color: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+/* Warning */
+.badge-warning {
+  background-color: var(--warning-bg);
+  color: #fbbf24;
+  border-color: var(--warning-border);
+}
+.dot-warning {
+  background-color: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+
+/* Danger */
+.badge-danger {
+  background-color: var(--danger-bg);
+  color: #f87171;
+  border-color: var(--danger-border);
+}
+.dot-danger {
+  background-color: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+
+/* Info */
+.badge-info {
+  background-color: var(--info-bg);
+  color: #38bdf8;
+  border-color: var(--info-border);
+}
+.dot-info {
+  background-color: #0ea5e9;
+  box-shadow: 0 0 6px #0ea5e9;
+}
+
+/* Purple */
+.badge-purple {
+  background-color: rgba(139, 92, 246, 0.12);
+  color: #c084fc;
+  border-color: rgba(139, 92, 246, 0.3);
+}
+.dot-purple {
+  background-color: #8b5cf6;
+  box-shadow: 0 0 6px #8b5cf6;
+}
+
+/* Neutral */
+.badge-neutral {
+  background-color: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.25);
+}
+.dot-neutral {
+  background-color: #94a3b8;
+}
