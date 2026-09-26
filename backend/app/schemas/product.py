@@ -16,11 +16,11 @@ class ProductCreate(ProductBase):
 
 
 class ProductUpdate(BaseModel):
-    name: Optional[str] = None
-    sku: Optional[str] = None
-    category: Optional[str] = None
-    unit: Optional[str] = None
-    reorder_level: Optional[int] = Field(None, ge=0)
+    name: Optional[str] = Field(None, min_length=1, description="Name of the product")
+    sku: Optional[str] = Field(None, min_length=1, description="Unique stock keeping unit")
+    category: Optional[str] = Field(None, description="Product category")
+    unit: Optional[str] = Field(None, description="Unit of measurement (e.g., pcs, kg, box)")
+    reorder_level: Optional[int] = Field(None, ge=0, description="Minimum threshold before reordering")
 
 
 class ProductResponse(ProductBase):
