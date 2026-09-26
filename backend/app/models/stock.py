@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, ForeignKey, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -14,6 +14,7 @@ class Stock(Base):
 
     __table_args__ = (
         UniqueConstraint("product_id", "warehouse_id", name="uq_product_warehouse_stock"),
+        CheckConstraint("quantity >= 0", name="chk_stock_quantity_non_negative"),
     )
 
     # Relationships

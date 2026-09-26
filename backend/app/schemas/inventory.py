@@ -24,15 +24,27 @@ class WarehouseResponse(WarehouseBase):
 class StockBase(BaseModel):
     product_id: int
     warehouse_id: int
-    quantity: int = Field(0, description="Current stock quantity")
+    quantity: int = Field(0, ge=0, description="Current stock quantity")
 
 
 class StockUpdate(BaseModel):
-    quantity: int = Field(..., description="Target or adjusted stock quantity")
+    quantity: int = Field(..., ge=0, description="Target or adjusted stock quantity")
 
 
 class StockResponse(StockBase):
     id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StockDetailResponse(BaseModel):
+    id: int
+    product_id: int
+    product_name: str
+    sku: str
+    warehouse_id: int
+    warehouse_name: str
+    quantity: int
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -55,5 +67,28 @@ class TransactionCreate(TransactionBase):
 class TransactionResponse(TransactionBase):
     id: int
     created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Inventory Operation Schemas (Receipt & Delivery)
+class ReceiptCreate(BaseModel):
+    product_id: int = Field(..., description="ID of the product being received")
+    warehouse_id: int = Field(..., description="ID of the warehouse receiving the stock")
+    quantity: int = Field(..., gt=0, description="Quantity received, must be greater than 0")
+    reference: Optional[str] = Field(None, description="Purchase order or delivery reference")
+
+
+class DeliveryCreate(BaseModel):
+    product_id: int = Field(..., description="ID of the product being delivered")
+    warehouse_id: int = Field(..., description="ID of the warehouse fulfilling the delivery")
+    quantity: int = Field(..., gt=0, description="Quantity delivered, must be greater than 0")
+    reference: Optional[str] = Field(None, description="Sales order or delivery order reference")
+
+
+class InventoryOperationResponse(BaseModel):
+    message: str
+    stock: StockDetailResponse
+    transaction: TransactionResponse
 
     model_config = ConfigDict(from_attributes=True)
